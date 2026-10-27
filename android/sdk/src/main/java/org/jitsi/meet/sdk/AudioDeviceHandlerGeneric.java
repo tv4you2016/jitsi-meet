@@ -78,6 +78,8 @@ class AudioDeviceHandlerGeneric implements
      */
     private AudioManager audioManager;
 
+    private boolean started;
+
     /**
      * {@link Runnable} for running audio device detection in the audio thread.
      * This is only used on Android >= M.
@@ -85,8 +87,16 @@ class AudioDeviceHandlerGeneric implements
     private final Runnable onAudioDeviceChangeRunner = new Runnable() {
         @Override
         public void run() {
+            if (!started) {
+                return;
+            }
             Set<String> devices = new HashSet<>();
             AudioDeviceInfo[] deviceInfos = audioManager.getDevices(AudioManager.GET_DEVICES_ALL);
+
+            for (AudioDeviceInfo deviceInfo : deviceInfos) {
+                JitsiMeetLogger.i(TAG + " AudioDeviceInfo : type=" + deviceInfo.getType()
+                    + ", name=" + deviceInfo.getProductName());
+            }
 
             for (AudioDeviceInfo info: deviceInfos) {
                 switch (info.getType()) {
@@ -105,6 +115,9 @@ class AudioDeviceHandlerGeneric implements
                     case TYPE_HEARING_AID:
                     case TYPE_USB_HEADSET:
                         devices.add(AudioModeModule.DEVICE_HEADPHONES);
+                        break;
+                    case AudioDeviceInfo.TYPE_USB_DEVICE:
+                        devices.add(AudioModeModule.USB_DEVICE);
                         break;
                 }
             }
@@ -157,6 +170,9 @@ class AudioDeviceHandlerGeneric implements
         module.runInAudioThread(new Runnable() {
             @Override
             public void run() {
+                if (!started) {
+                    return;
+                }
                 switch (focusChange) {
                     case AudioManager.AUDIOFOCUS_GAIN: {
                         JitsiMeetLogger.d(TAG + " Audio focus gained");
@@ -200,13 +216,14 @@ class AudioDeviceHandlerGeneric implements
         JitsiMeetLogger.i("Using " + TAG + " as the audio device handler");
 
         module = audioModeModule;
+        started = true;
 
         // Setup runtime device change detection.
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, null);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             modeChangedListener = newMode -> {
-                if (lastRequestedMode != AudioModeModule.DEFAULT
+                if (started && lastRequestedMode != AudioModeModule.DEFAULT
                         && newMode != AudioManager.MODE_IN_COMMUNICATION) {
                     JitsiMeetLogger.w(TAG + " Re-asserting audio mode after mid-call reset");
                     module.resetAudioRoute();
@@ -221,11 +238,17 @@ class AudioDeviceHandlerGeneric implements
 
     @Override
     public void stop() {
-        audioManager.unregisterAudioDeviceCallback(audioDeviceCallback);
-
-        if (modeChangedListener != null) {
-            audioManager.removeOnModeChangedListener(modeChangedListener);
-            modeChangedListener = null;
+        started = false;
+        try {
+            // Release focus and routing even when the handler is replaced or
+            // the React runtime disappears without a final JS setMode call.
+            setMode(AudioModeModule.DEFAULT);
+        } finally {
+            audioManager.unregisterAudioDeviceCallback(audioDeviceCallback);
+            if (modeChangedListener != null) {
+                audioManager.removeOnModeChangedListener(modeChangedListener);
+                modeChangedListener = null;
+            }
         }
     }
 

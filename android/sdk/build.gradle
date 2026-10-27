@@ -44,7 +44,13 @@ android {
 
     // JNI shim that registers TurboModules so consumers don't need libappmodules.so.
     externalNativeBuild {
-        cmake { path 'src/main/jni/CMakeLists.txt' }
+        cmake {
+            path 'src/main/jni/CMakeLists.txt'
+            if (System.getProperty('os.name').toLowerCase().contains('windows')) {
+                // Ninja >= 1.12 supports the long paths produced by RN codegen.
+                version '4.1.2'
+            }
+        }
     }
     buildFeatures {
         prefab true
@@ -158,7 +164,10 @@ android.libraryVariants.all { def variant ->
 
         // Set up inputs and outputs so gradle can cache the result
         def reactRoot = file("${projectDir}/../../")
-        inputs.files fileTree(dir: reactRoot, excludes: ["android/**", "ios/**"])
+        inputs.files fileTree(dir: reactRoot, excludes: [
+            "android/**", "ios/**", "**/.gradle/**", "**/.cxx/**",
+            "node_modules/**/android/build/**"
+        ])
         outputs.dir jsBundleDir
         outputs.dir resourcesDir
 
@@ -178,7 +187,8 @@ android.libraryVariants.all { def variant ->
                 "--bundle-output", jsBundleFile,
                 "--assets-dest", resourcesDir,
                 // Reuse the autolinking manifest instead of re-running `react-native config`.
-                "--config-cmd", "cat '${gradle.ext.autolinkingManifest}'")
+                "--config-cmd",
+                "node -e \"process.stdout.write(require('fs').readFileSync(process.argv[1]))\" \"${gradle.ext.autolinkingManifest}\"")
 
         // Disable bundling on dev builds
         enabled !devEnabled
@@ -254,6 +264,7 @@ publishing {
 
             artifact("${project.buildDir}/outputs/aar/${project.name}-release.aar") {
                 extension "aar"
+                builtBy(tasks.matching { it.name == 'bundleReleaseAar' })
             }
             pom.withXml {
                 def pomXml = asNode()

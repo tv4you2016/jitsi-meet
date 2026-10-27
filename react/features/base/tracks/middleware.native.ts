@@ -1,4 +1,5 @@
 import { IStore } from '../../app/types';
+import { APP_WILL_UNMOUNT } from '../app/actionTypes';
 import { SET_AUDIO_MUTED } from '../media/actionTypes';
 import {
     MEDIA_TYPE,
@@ -11,10 +12,12 @@ import {
 } from './actionTypes';
 import {
     createLocalTracksA,
+    destroyLocalTracks,
     toggleScreensharing,
     trackMuteUnmuteFailed
 } from './actions.native';
 import { getLocalTrack, setTrackMuted } from './functions.any';
+import logger from './logger';
 
 import './middleware.any';
 
@@ -28,6 +31,10 @@ import './middleware.any';
  */
 MiddlewareRegistry.register(store => next => action => {
     switch (action.type) {
+    case APP_WILL_UNMOUNT:
+        store.dispatch(destroyLocalTracks())
+            .catch((error: Error) => logger.error('Failed to release tracks on unmount', error));
+        break;
     case SET_AUDIO_MUTED: {
         _setMuted(store, action);
         break;

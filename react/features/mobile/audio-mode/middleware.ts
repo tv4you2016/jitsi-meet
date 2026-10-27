@@ -36,6 +36,8 @@ MiddlewareRegistry.register(store => next => action => {
         _setSubscriptions(store);
         break;
     case APP_WILL_UNMOUNT: {
+        AudioMode.setMode(AudioMode.DEFAULT)
+            .catch((err: any) => logger.error('Failed to reset audio mode on unmount', err));
         store.dispatch({
             type: _SET_AUDIOMODE_SUBSCRIPTIONS,
             subscriptions: undefined

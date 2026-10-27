@@ -136,6 +136,7 @@ allprojects {
 
             task jitsiAndroidSourcesJar(type: Jar) {
                 archiveClassifier = 'sources'
+                dependsOn tasks.matching { it.name == 'generateCodegenArtifactsFromSchema' }
                 from android.sourceSets.main.java.source
             }
 
@@ -147,6 +148,7 @@ allprojects {
 
                     artifact("${project.buildDir}/outputs/aar/${project.name}-release.aar") {
                         extension "aar"
+                        builtBy(project.tasks.matching { it.name == 'bundleReleaseAar' })
                     }
                     artifact(jitsiAndroidSourcesJar)
                     pom.withXml {

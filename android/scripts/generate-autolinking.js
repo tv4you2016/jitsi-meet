@@ -15,7 +15,8 @@ const LIBRE_EXCLUDED_MODULES = [
 
 const root = path.resolve(__dirname, '../..');
 const out = path.join(root, 'node_modules/.jitsi/autolinking.json');
-const config = JSON.parse(execFileSync('npx', [ 'react-native', 'config' ], {
+const cli = require.resolve('@react-native-community/cli/build/bin.js');
+const config = JSON.parse(execFileSync(process.execPath, [ cli, 'config' ], {
     cwd: root,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024

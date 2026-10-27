@@ -107,6 +107,7 @@ class AudioModeModule extends ReactContextBaseJavaModule {
     static final String DEVICE_EARPIECE   = "EARPIECE";
     static final String DEVICE_HEADPHONES = "HEADPHONES";
     static final String DEVICE_SPEAKER    = "SPEAKER";
+    static final String USB_DEVICE        = "USB_DEVICE";
 
     /**
      * Device change event.
@@ -133,6 +134,8 @@ class AudioModeModule extends ReactContextBaseJavaModule {
      * Whether or not audio is disabled.
      */
     private boolean audioDisabled;
+
+    private volatile boolean invalidated;
 
     /**
      * Initializes a new module instance. There shall be a single instance of
@@ -181,6 +184,9 @@ class AudioModeModule extends ReactContextBaseJavaModule {
         runInAudioThread(new Runnable() {
             @Override
             public void run() {
+                if (invalidated) {
+                    return;
+                }
                 WritableArray data = Arguments.createArray();
                 final boolean hasHeadphones = availableDevices.contains(DEVICE_HEADPHONES);
                 for (String device : availableDevices) {
@@ -248,12 +254,36 @@ class AudioModeModule extends ReactContextBaseJavaModule {
         audioDeviceHandler.start(this);
     }
 
+    @Override
+    public void invalidate() {
+        invalidated = true;
+        executor.execute(() -> {
+            try {
+                if (audioDeviceHandler != null) {
+                    audioDeviceHandler.stop();
+                }
+            } catch (Throwable e) {
+                JitsiMeetLogger.e(e, TAG + " Failed to release audio handler");
+            } finally {
+                audioDeviceHandler = null;
+                mode = -1;
+                availableDevices.clear();
+                resetSelectedDevice();
+            }
+        });
+        super.invalidate();
+    }
+
     /**
      * Helper function to run operations on a dedicated thread.
      * @param runnable
      */
     void runInAudioThread(Runnable runnable) {
-        executor.execute(runnable);
+        executor.execute(() -> {
+            if (!invalidated) {
+                runnable.run();
+            }
+        });
     }
 
     /**
@@ -283,23 +313,23 @@ class AudioModeModule extends ReactContextBaseJavaModule {
 
     @ReactMethod
     public void setDisabled(final boolean disabled, final Promise promise) {
-        if (audioDisabled == disabled) {
-            promise.resolve(null);
-            return;
-        }
-
-        JitsiMeetLogger.i(TAG + "  audio disabled: " + disabled);
-
-        audioDisabled = disabled;
-        setAudioDeviceHandler();
-
-        if (disabled) {
-            mode = -1;
-            availableDevices.clear();
-            resetSelectedDevice();
-        }
-
-        promise.resolve(null);
+        runInAudioThread(() -> {
+            try {
+                if (audioDisabled != disabled) {
+                    JitsiMeetLogger.i(TAG + " audio disabled: " + disabled);
+                    audioDisabled = disabled;
+                    setAudioDeviceHandler();
+                    if (disabled) {
+                        mode = -1;
+                        availableDevices.clear();
+                        resetSelectedDevice();
+                    }
+                }
+                promise.resolve(null);
+            } catch (Throwable e) {
+                promise.reject("setDisabled", e);
+            }
+        });
     }
 
     /**
@@ -311,11 +341,6 @@ class AudioModeModule extends ReactContextBaseJavaModule {
      */
     @ReactMethod
     public void setMode(final int mode, final Promise promise) {
-        if (audioDisabled) {
-            promise.resolve(null);
-            return;
-        }
-
         if (mode < DEFAULT || mode > IN_CALL) {
             promise.reject("setMode", "Invalid audio mode " + mode);
             return;
@@ -333,6 +358,10 @@ class AudioModeModule extends ReactContextBaseJavaModule {
         runInAudioThread(new Runnable() {
             @Override
             public void run() {
+                if (audioDisabled) {
+                    promise.resolve(null);
+                    return;
+                }
                 boolean success;
 
                 try {
@@ -392,6 +421,7 @@ class AudioModeModule extends ReactContextBaseJavaModule {
 
         boolean bluetoothAvailable = availableDevices.contains(DEVICE_BLUETOOTH);
         boolean headsetAvailable = availableDevices.contains(DEVICE_HEADPHONES);
+        boolean usbAvailable = availableDevices.contains(USB_DEVICE);
 
         // Pick the desired device based on what's available and the mode.
         String audioDevice;
@@ -399,6 +429,8 @@ class AudioModeModule extends ReactContextBaseJavaModule {
             audioDevice = DEVICE_BLUETOOTH;
         } else if (headsetAvailable) {
             audioDevice = DEVICE_HEADPHONES;
+        } else if (usbAvailable) {
+            audioDevice = USB_DEVICE;
         } else {
             audioDevice = DEVICE_SPEAKER;
         }

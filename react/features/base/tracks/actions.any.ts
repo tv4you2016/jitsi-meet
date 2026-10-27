@@ -241,17 +241,18 @@ export function destroyLocalTracks(track: any = null) {
         return (dispatch: IStore['dispatch']) => dispatch(_disposeAndRemoveTracks([ track ]));
     }
 
-    return (dispatch: IStore['dispatch'], getState: IStore['getState']) =>
+    return (dispatch: IStore['dispatch'], getState: IStore['getState']) => {
+        // Snapshot the tracks being closed so a subsequent meeting's tracks
+        // cannot be disposed when an old getUserMedia request finally settles.
+        const tracks = getState()['features/base/tracks']
+            .filter(t => t.local && t.jitsiTrack)
+            .map(t => t.jitsiTrack);
+        const pending = _cancelGUMProcesses(getState);
 
-        // First wait until any getUserMedia in progress is settled and then get
-        // rid of all local tracks.
-        _cancelGUMProcesses(getState)
-            .then(() =>
-                dispatch(
-                    _disposeAndRemoveTracks(
-                        getState()['features/base/tracks']
-                            .filter(t => t.local)
-                            .map(t => t.jitsiTrack))));
+        // Release existing captures immediately. Canceled requests dispose their
+        // own tracks on completion, even if getUserMedia takes a long time.
+        return Promise.all([ pending, dispatch(_disposeAndRemoveTracks(tracks)) ]);
+    };
 }
 
 /**
@@ -746,9 +747,9 @@ function _cancelGUMProcesses(getState: IStore['getState']): Promise<any> {
  */
 export function _disposeAndRemoveTracks(tracks: any[]) {
     return (dispatch: IStore['dispatch']) =>
-        _disposeTracks(tracks)
-            .then(() =>
-                Promise.all(tracks.map(t => dispatch(trackRemoved(t)))));
+        Promise.all(tracks.map(t =>
+            _disposeTracks([ t ])
+                .then(() => dispatch(trackRemoved(t)))));
 }
 
 /**
@@ -761,15 +762,20 @@ export function _disposeAndRemoveTracks(tracks: any[]) {
  */
 function _disposeTracks(tracks: any[]): Promise<any> {
     return Promise.all(
-        tracks.map(t =>
-            t.dispose()
+        tracks.map(async t => {
+            logger.info('Disposing local track', t.getType());
+
+            return t.dispose()
+                .then(() => logger.info('Disposed local track', t.getType()))
                 .catch((err: Error) => {
                     // Track might be already disposed so ignore such an error.
                     // Of course, re-throw any other error(s).
                     if (err.name !== JitsiTrackErrors.TRACK_IS_DISPOSED) {
+                        logger.error('Failed to dispose local track', t.getType(), err);
                         throw err;
                     }
-                })));
+                });
+        }));
 }
 
 /**
