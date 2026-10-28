@@ -26,6 +26,7 @@ import com.facebook.react.bridge.JSBundleLoader;
 import com.facebook.react.bridge.NativeModule;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContext;
+import com.facebook.react.bridge.UiThreadUtil;
 import com.facebook.react.bridge.RetryableMountingLayerException;
 import com.facebook.react.defaults.DefaultComponentsRegistry;
 import com.facebook.react.defaults.DefaultReactHostDelegate;
@@ -37,6 +38,7 @@ import com.facebook.react.runtime.hermes.HermesInstance;
 import com.facebook.react.uimanager.ViewManager;
 import com.oney.WebRTCModule.EglUtils;
 import com.oney.WebRTCModule.WebRTCModuleOptions;
+import com.oney.WebRTCModule.WebRTCModule;
 
 import org.jitsi.meet.sdk.log.JitsiMeetLogger;
 import org.webrtc.EglBase;
@@ -269,14 +271,34 @@ class ReactHostHolder {
      * new one can be built. Teardown is asynchronous.
      */
     static void destroyReactHost() {
+        destroyReactHost(null);
+    }
+
+    static void destroyReactHost(@Nullable Runnable onComplete) {
         if (reactHost == null) {
+            if (onComplete != null) {
+                UiThreadUtil.runOnUiThread(onComplete);
+            }
             return;
         }
 
         JitsiMeetLogger.d(TAG + " destroying RN");
 
-        reactHost.invalidate();
+        ReactHost oldHost = reactHost;
+        WebRTCModule webRTCModule = getNativeModule(WebRTCModule.class);
         reactHost = null;
+
+        Runnable finish = () -> UiThreadUtil.runOnUiThread(() -> {
+            oldHost.invalidate();
+            if (onComplete != null) {
+                onComplete.run();
+            }
+        });
+        if (webRTCModule != null) {
+            webRTCModule.releaseResources(finish);
+        } else {
+            finish.run();
+        }
     }
 
     // Matches the missing-viewState mount race fixed upstream in react-native #57181.

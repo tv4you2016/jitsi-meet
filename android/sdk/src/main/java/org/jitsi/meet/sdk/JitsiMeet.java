@@ -99,6 +99,16 @@ public class JitsiMeet {
         ReactHostHolder.destroyReactHost();
     }
 
+    /**
+     * Releases native WebRTC resources before invalidating the runtime, then
+     * invokes {@code onComplete} on the UI thread. All meeting views must have
+     * been disposed first. Hosts can safely resume other microphone consumers
+     * from this callback.
+     */
+    public static void destroyReactNative(Runnable onComplete) {
+        ReactHostHolder.destroyReactHost(onComplete);
+    }
+
     public static boolean isCrashReportingDisabled(Context context) {
         SharedPreferences preferences = context.getSharedPreferences("jitsi-default-preferences", Context.MODE_PRIVATE);
         String value = preferences.getString("isCrashReportingDisabled", "");
